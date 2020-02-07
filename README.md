@@ -220,7 +220,7 @@ public class Main {
 
 
 ### Disruptor - 多消费者模型讲解
-- 依赖WorkerPoo|实现多消费者:
+- 依赖`WorkerPool`实现多消费者:
 ```java
 workerPool(final RingBuffer<T> ringBuffer,
            final SequenceBarrier sequenceBarrier,
