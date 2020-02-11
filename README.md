@@ -1,21 +1,113 @@
 # hello-disruptor
 [GITHUB - Disruptor](https://github.com/LMAX-Exchange/disruptor)
+## 并发编程基础
+### Atomic系列类 & UnSafe类
+#### Atmoic系列类提供了原子性操作，保障多线程下的安全
+**UnSafe类的四大作用:**
+- 内存操作
+- 字段的定位与修改
+- 挂起与恢复
+- CAS操作(乐观锁)
+### Volatile
+- 作用一：多线程间的可见性
+- 作用二：阻止指令重排序
+### J.U.C工具类
+- CountDownLatch & CyclicBarrier
+- Future模式与Caller接口
+- Exchanger线程数据交换器
+- ForkJoin并行计算框架
+- Semaphore信号量
+### AQS锁
+- ReentrantLock重入锁
+- ReentrantReadWriteLock读写锁
+- Condition条件判断
+- LockSupport基于线程的锁
+### 线程池核心
+- Executors工厂类
+- ThreadPoolExecutor自定义线程池
+- 计算机密集型与IO密集型
+  - 计算机密集型：核心线程数取`cpu核心数量 + 1`或者`cpu核心数量 * 2`
+  - IO密集型：核心线程数取`cpu核心数量 / (1 - 阻塞系数)`，阻塞系数一般为0.8 - 0.9
+```java
+ThreadPoolExecutor pool = new ThreadPoolExecutor(
+        核心线程数,
+        最大线程数,
+        存活时间,
+        TimeUnit.SECONDS,
+        new ArrayBlockingQueue<>(200),
+        new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new
+                        Thread(r);
+                t.setName("order- thread");
+                if (t.isDaemon()) {
+                    t.setDaemon(false);
+                }
+                if (Thread.NORM_PRIORITY != t.getPriority()) {
+                    t.setPriority(Thread.NORM_PRIORITY);
+                }
+                return t;
+            }
+        },
+        new RejectedExecutionHandler() {
+            @Override
+            public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+                System.out.println("拒绝策略：" + r + " executor：" + executor);
+            }
+        }
+);
+```
+### AQS架构
+```java
+      +------+  prev +-----+       +-----+
+ head |      | <---- |     | <---- |     |  tail
+      +------+       +-----+       +-----+
+```
+- AQS维护了-个volatile int state (代表共享资源)和一-个FIFO
+- 线程等待队列(多线程争用资源被阻塞时会进入此队列)
+- AQS定义两种资源共享方式: Exclusive, Share
+    - isHeldExclusively方法:该线程是否正在独占资源
+    - tryAcquire / tryRelease :独占的方式尝试获取和释放资源（成功返回true）
+    - tryAcquireShared / tryReleaseShared :共享方式尝试获取和释放资源
+      - `tryAcquireShared` 尝试以共享模式进行获取。该方法应查询对象的状态是否允许以共享模式获取对象，如果允许，则查询该对象。此方法始终由执行获取的线程调用。如果此方法报告失败，则获取方法可能会将线程排队（如果尚未排队），直到被其他线程释放发出信号为止。
+      - 返回负值说明获取失败，返回零则表示没有可用的资源，正数则表示获取成功
+
+### AQS - ReentrantLock
+
+- **state初始化为0**，表示未锁定状态
+- A线程`lock()`时，会调用`tryAcquire()`独占该锁并将**state+ 1**
+- 此后，其他线程再`tryAcquire()`时就会失败，直到A线程**unlock()**到**state=0** (即释放锁)为止，其它线程才有机会获取该锁
+
+- 当然，释放锁之前，A线程自己是可以重复获取此锁的(**state会累加**)，这就是**可重入**的概念
+- 但要注意，获取多少次就要释放多么次，这样才能保证state是能回到零态的
+
+
+
+### AQS - CountDownLatch
+
+- 任务分为N个子线程去执行，**state**也初始化为N (注意N要与线程个数一致)
+- 这N个子线程是并行执行的，每个子线程执行完后**countDown()**一次，**state会CAS减1**
+- 等到所有子线程都执行完后**(即state=0)**，会**unpark()**调用线程
+- 然后主调用线程就会从**await()**函数返回，继续后余动作
+
 ## Disruptor Quick Start
 1. 建立一个工厂"Event类， 用于创建Event类实例对象
 2. 需要有一个监听事件类，用于处理数据(Event类)
 3. 实例化Disruptor实例，配置-系列参数，编写Disruptor核心组件
 4. 编写生产者组件，向Disruptor容器中去投递数据
 
-## Disruptor核心原理 - RingBuffer
+## Disruptor核心原理
+### Disruptor核心 - RingBuffer
 [GITHUB - Disruptor - Introduction](https://github.com/LMAX-Exchange/disruptor/wiki/Introduction)
 - 初看Disruptor，给人的印象就是RingBuffer是其核心，生产者向RingBuffer中写入元素，消费者从RingBuffer中消费元素
 
-### RingBuffer到底是啥
+#### RingBuffer到底是啥
 - 正如名字所说的一样，它是一个环(首尾相接的环)
 - 它用做在不同上下文(线程)间传递数据的buffer!
 - RingBuffer拥有一个序号，这个序号指向数组中下一个可用元素
 
-### RingBuffer数据结构深入探究
+#### RingBuffer数据结构深入探究
 - 随着你不停地填充这个buffer (可能也会有相应的读取)， 这个序号会一直增长，直到绕过这个环
 - 要找到数组中当前序号指向的元素，可以通过mod操作: sequence mod array length = array index (取模操作)以上面的RingBuffer的size 10 为例(java的mod语法) : 12 % 10= 2
 - 如果槽的个数是2的N次方更有利于基于二进制的计算机进行计算
@@ -284,3 +376,62 @@ public class Main {
     }
 }
 ```
+
+## Disruptor源码分析
+
+### Disruptor为何底层性能如此牛?
+
+- 数据结构层面:使用环形结构、数组、内存预加载
+- 使用单线程写方式、内存屏障
+- 消除伪共享(填充缓存行)
+- 序号栅栏和序号配合使用来消除锁和CAS
+
+#### 高性能之道 - 数据结构 - 内存预加载机制
+
+- RingBuffer使用数组Object[] entries作为存储元素
+- 预加载即RingBuffer中的fill方法对数组的每一个位置创建一个空的event对象
+
+#### 高性能之道 - 内核 - 使用单线程写
+
+- Disruptor的RingBuffer，之所以可以做到完全无锁，也是因为"单线程写"，这是所有前提的前提
+- 离了这个前提条件，没有任何技术可以做到完全无锁
+- Redis、Netty等等高性能技术框架的设计都是这个核心思想
+
+#### 高性能之道 - 系统内存优化 - 内存屏障
+
+- 要正确的实现无锁，还需要另外一个关键技术：内存屏障。
+- 对应到Java语言，就是valotile变量与happens before语义。
+- 内存屏障 - Linux的`smp _wmb()/smp_rmb()`
+- 系统内核:拿Linux的kfifo来举例：smp_ wmb()，无论是底层的读写都是使用了Linux的smp_wmb
+
+> Linux内核源码 - https://github.com/opennetworklinux/linux-3.8.13/blob/master/kernel/kfifo.c
+
+#### 高性能之道 - 系统缓存优化 - 消除伪共享
+
+- 缓存系统中是以**缓存行(cache line)**为单位存储的
+- 缓存行是2的整数幂个连续字节，一般为32 - 256个字节
+- 最常见的缓存行大小是64个字节
+- 当多线程修改互相独立的变量时，如果这些变量共享同一个缓存行，就会无意中影响彼此的性能，这就是伪共享
+- Sequence消除伪共享原理，（左边填充7个long）value（右边填充7个long）使得存储的变量不会和其他变量在同一个缓存行，采用的是空间换时间的原理
+
+```java
+class LhsPadding {
+    protected long p1, p2, p3, p4, p5, p6, p7;
+}
+
+class Value extends LhsPadding {
+    protected volatile long value;
+}
+
+class RhsPadding extends Value {
+    protected long p9, p10, p11, p12, p13, p14, p15;
+}
+
+public class Sequence extends RhsPadding { ... }
+```
+
+> **JDK1.8中增加了Contended注解方式来解决缓存伪共享问题。**
+>
+> 在JDK1.8中，新增了一种注解@sun.misc.Contended，来使各个变量在Cache line中分隔开。注意，jvm需要添加参数-XX:-RestrictContended才能开启此功能 
+
+#### 
